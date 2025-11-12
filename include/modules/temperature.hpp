@@ -9,6 +9,8 @@
 
 namespace waybar::modules {
 
+enum SensorType { TEMPERATURE, FAN, POWER };
+
 class Temperature : public ALabel {
  public:
   Temperature(const std::string&, const Json::Value&);
@@ -16,11 +18,12 @@ class Temperature : public ALabel {
   auto update() -> void override;
 
  private:
-  float getTemperature();
+  float getReadings();
   bool isCritical(uint16_t);
   bool isWarning(uint16_t);
 
   std::string file_path_;
+  SensorType sensor_type_{TEMPERATURE};
   util::SleeperThread thread_;
 };
 

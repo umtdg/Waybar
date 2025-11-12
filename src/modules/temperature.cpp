@@ -12,6 +12,12 @@ waybar::modules::Temperature::Temperature(const std::string& id, const Json::Val
 #if defined(__FreeBSD__)
 // FreeBSD uses sysctlbyname instead of read from a file
 #else
+  if (config_["type"].isString()) {
+    if (config_["type"].asString() == "temperature") sensor_type_ = SensorType::TEMPERATURE;
+    if (config_["type"].asString() == "fan") sensor_type_ = SensorType::FAN;
+    if (config_["type"].asString() == "power") sensor_type_ = SensorType::POWER;
+  }
+
   auto traverseAsArray = [](const Json::Value& value, auto&& check_set_path) {
     if (value.isString())
       check_set_path(value.asString());
@@ -40,7 +46,7 @@ waybar::modules::Temperature::Temperature(const std::string& id, const Json::Val
     });
   }
 
-  if (file_path_.empty()) {
+  if (file_path_.empty() && sensor_type_ == SensorType::TEMPERATURE) {
     auto zone = config_["thermal-zone"].isInt() ? config_["thermal-zone"].asInt() : 0;
     file_path_ = fmt::format("/sys/class/thermal/thermal_zone{}/temp", zone);
   }
@@ -64,12 +70,9 @@ waybar::modules::Temperature::Temperature(const std::string& id, const Json::Val
 }
 
 auto waybar::modules::Temperature::update() -> void {
-  auto temperature = getTemperature();
-  uint16_t temperature_c = std::round(temperature);
-  uint16_t temperature_f = std::round(temperature * 1.8 + 32);
-  uint16_t temperature_k = std::round(temperature + 273.15);
-  auto critical = isCritical(temperature_c);
-  auto warning = isWarning(temperature_c);
+  uint16_t readings = std::round(getReadings());
+  auto critical = isCritical(readings);
+  auto warning = isWarning(readings);
   auto format = format_;
   if (critical) {
     format = config_["format-critical"].isString() ? config_["format-critical"].asString() : format;
@@ -91,26 +94,63 @@ auto waybar::modules::Temperature::update() -> void {
 
   event_box_.show();
 
-  auto max_temp = config_["critical-threshold"].isInt() ? config_["critical-threshold"].asInt() : 0;
+  auto max_reading =
+      config_["critical-threshold"].isInt() ? config_["critical-threshold"].asInt() : 0;
+
+  uint16_t power = 0;
+  uint16_t fan_speed = 0;
+  uint16_t temperature_c = 0;
+  uint16_t temperature_f = 0;
+  uint16_t temperature_k = 0;
+  switch (sensor_type_) {
+    case TEMPERATURE:
+      temperature_c = readings;
+      temperature_f = std::round(readings * 1.8 + 32);
+      temperature_k = std::round(readings + 273.15);
+      break;
+    case FAN:
+      fan_speed = readings;
+      break;
+    case POWER:
+      power = readings;
+      break;
+  }
+
   label_.set_markup(fmt::format(fmt::runtime(format), fmt::arg("temperatureC", temperature_c),
                                 fmt::arg("temperatureF", temperature_f),
                                 fmt::arg("temperatureK", temperature_k),
-                                fmt::arg("icon", getIcon(temperature_c, "", max_temp))));
+                                fmt::arg("icon", getIcon(readings, "", max_reading)),
+                                fmt::arg("fan", fan_speed), fmt::arg("power", power)));
   if (tooltipEnabled()) {
-    std::string tooltip_format = "{temperatureC}°C";
+    std::string tooltip_format = "";
+    switch (sensor_type_) {
+      case TEMPERATURE:
+        tooltip_format = "{temperatureC}°C";
+        break;
+      case FAN:
+        tooltip_format = "{fan} RPM";
+        break;
+      case POWER:
+        tooltip_format = "{power}W";
+        break;
+    }
     if (config_["tooltip-format"].isString()) {
       tooltip_format = config_["tooltip-format"].asString();
     }
     label_.set_tooltip_text(fmt::format(
         fmt::runtime(tooltip_format), fmt::arg("temperatureC", temperature_c),
-        fmt::arg("temperatureF", temperature_f), fmt::arg("temperatureK", temperature_k)));
+        fmt::arg("temperatureF", temperature_f), fmt::arg("temperatureK", temperature_k),
+        fmt::arg("power", power), fmt::arg("fan", fan_speed)));
   }
   // Call parent update
   ALabel::update();
 }
 
-float waybar::modules::Temperature::getTemperature() {
+float waybar::modules::Temperature::getReadings() {
 #if defined(__FreeBSD__)
+  if (sensor_type_ != SensorType::TEMPERATURE)
+    throw std::runtime_error("Only temperature sensor reading is supported in FreeBSD");
+
   int temp;
   size_t size = sizeof temp;
 
@@ -127,22 +167,30 @@ float waybar::modules::Temperature::getTemperature() {
 
   throw std::runtime_error(fmt::format(
       "sysctl hw.acpi.thermal.tz{}.temperature and dev.cpu.{}.temperature failed", zone, zone));
-
-#else  // Linux
-  std::ifstream temp(file_path_);
-  if (!temp.is_open()) {
+#else
+  std::ifstream file(file_path_);
+  if (!file.is_open()) {
     throw std::runtime_error("Can't open " + file_path_);
   }
+
   std::string line;
-  if (temp.good()) {
-    getline(temp, line);
+  if (file.good()) {
+    getline(file, line);
   } else {
-    temp.close();
+    file.close();
     throw std::runtime_error("Can't read from " + file_path_);
   }
-  temp.close();
-  auto temperature_c = std::strtol(line.c_str(), nullptr, 10) / 1000.0;
-  return temperature_c;
+  file.close();
+
+  auto reading = std::strtol(line.c_str(), nullptr, 10);
+  switch (sensor_type_) {
+    case TEMPERATURE:
+      return reading / 1000.0;
+    case FAN:
+      return static_cast<float>(reading);
+    case POWER:
+      return reading / 1000000.0;
+  }
 #endif
 }
 
