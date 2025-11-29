@@ -196,12 +196,10 @@ float waybar::modules::Temperature::getReadings() {
 #endif
 }
 
-bool waybar::modules::Temperature::isWarning(uint16_t temperature_c) {
-  return config_["warning-threshold"].isInt() &&
-         temperature_c >= config_["warning-threshold"].asInt();
+bool waybar::modules::Temperature::isWarning(uint16_t reading) {
+  return config_["warning-threshold"].isInt() && reading >= config_["warning-threshold"].asInt();
 }
 
-bool waybar::modules::Temperature::isCritical(uint16_t temperature_c) {
-  return config_["critical-threshold"].isInt() &&
-         temperature_c >= config_["critical-threshold"].asInt();
+bool waybar::modules::Temperature::isCritical(uint16_t reading) {
+  return config_["critical-threshold"].isInt() && reading >= config_["critical-threshold"].asInt();
 }
