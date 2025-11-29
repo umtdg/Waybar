@@ -187,10 +187,12 @@ float waybar::modules::Temperature::getReadings() {
     case TEMPERATURE:
       return reading / 1000.0;
     case FAN:
-      return static_cast<float>(reading);
+      break;
     case POWER:
       return reading / 1000000.0;
   }
+
+  return static_cast<float>(reading);
 #endif
 }
 
